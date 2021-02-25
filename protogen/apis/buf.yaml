@@ -1,0 +1,31 @@
+build:
+  roots:
+  - proto
+  - include/googleapis
+lint:
+  use:
+  - DEFAULT
+  except:
+  - RPC_REQUEST_RESPONSE_UNIQUE
+  - PACKAGE_SAME_JAVA_MULTIPLE_FILES
+  - RPC_REQUEST_STANDARD_NAME
+  - RPC_RESPONSE_STANDARD_NAME
+  ignore:
+  - google
+  - grafeas
+  - gapic
+  enum_zero_value_suffix: _UNSPECIFIED
+  rpc_allow_same_request_response: false
+  rpc_allow_google_protobuf_empty_requests: false
+  rpc_allow_google_protobuf_empty_responses: false
+  service_suffix: Service
+breaking:
+  use:
+  - WIRE_JSON
+  ignore:
+  - google
+  - grafeas
+  - gapic
+  ignore_only:
+    FIELD_SAME_ONEOF:
+      - derence/internal/dex/v1alpha7/dex_request.proto

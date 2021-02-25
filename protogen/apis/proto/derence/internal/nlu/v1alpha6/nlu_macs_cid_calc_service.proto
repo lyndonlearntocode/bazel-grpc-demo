@@ -1,0 +1,33 @@
+syntax = "proto3";
+
+package derence.internal.nlu.v1alpha6;
+
+
+option cc_enable_arenas = true;
+option java_multiple_files = false;
+option java_package = "com.derence.internal.nlu.v1alpha6";
+option java_outer_classname = "NluMACSCidCalcServiceProto";
+
+// Nlu Macs Cid Calculation service gRPC API.
+service NluMACSCidCalcService {
+  rpc CalcAlgo(MACSCidInfo) returns(MACSCid);
+}
+
+message MACSCidInfo {
+  string language = 1;
+  string ref_nlu_version = 2;
+  string sonic_nlu_version = 3;
+  repeated BuildInfo quick_nlu_build_infos = 4;
+  BuildInfo self_serve_build_info = 5;
+  repeated string ref_nlu_domains_for_hash = 6;
+  repeated string sonic_nlu_domains_for_hash = 7;
+}
+
+message BuildInfo {
+  string model_id = 1;
+  string build_id = 2;
+}
+
+message MACSCid {
+  string macs_cid = 1;
+}

@@ -1,0 +1,186 @@
+image: ${ARTIFACTORY_RELEASE_ADDRESS}/onecloud-docker/buf-build-protoc:806854
+
+###############################
+# VARIABLES
+###############################
+variables:
+  #CI_DEBUG_TRACE: "true"
+  GIT_SUBMODULE_STRATEGY: recursive
+
+############################### 
+## Release discriminant 
+################################ 
+.release_discriminant: &release_discriminant   
+  refs:
+    - /^release-\d+\.\d+\.\d+$/     
+    - tags
+
+.retry_on_system_failure: &retry_on_system_failure
+  retry:
+    max: 2
+    when: runner_system_failure
+
+################################
+## STAGES 
+################################ 
+stages:
+   - test
+   - build
+   - deploy
+
+############################### 
+## Deploy SNAPSHOT 
+################################ 
+snapshot:
+  <<: *retry_on_system_failure
+  stage: deploy   
+  script:     
+    - cd ./artifactory     
+    - mvn -B versions:set -DnewVersion=${CI_COMMIT_REF_NAME}-SNAPSHOT     
+    - mvn clean package deploy -B -U -Dvcs.branch.name=${CI_COMMIT_REF_NAME}   
+  except:
+    - /^release-\d+\.\d+\.\d+$/     
+    - tags
+    - schedule
+
+###############################
+# Deploy RELEASE #
+############################## 
+release:
+  <<: *retry_on_system_failure
+  stage: deploy   
+  script:   
+  - cd ./artifactory   
+  - DERENCE_RELEASE=$(echo ${CI_COMMIT_TAG} | grep -oP '\d+\.\d+\.\d+')   
+  - mvn -B versions:set -DnewVersion=${DERENCE_RELEASE} versions:commit   
+# we skip tests and sonar because we know the previous job passed, and that one ran all the tests already   
+  - mvn -B deploy -DskipTests -Dsonar.skip=true   
+# we don't want to pollute the cache with jars that will only be used once, so we delete them   
+  - find -L ~/.m2/repository -type d -name "${DERENCE_RELEASE}" -prune -exec rm -rfv {} \;
+  except:
+    - schedule
+  only:     
+    <<: *release_discriminant     
+    variables:       
+      - $PROTECTED
+
+################################
+# Protoc and documentation 
+################################
+build:
+  <<: *retry_on_system_failure
+  stage: build
+  script:
+    - echo "Building with buf"
+    - buf image build -o image.bin
+    - echo "Building with protoc and creating Java output"
+    - mkdir -p output/java
+    - find proto -name *.proto -exec protoc -I proto -I /src/include/ -I include/googleapis --java_out=output/java {} \;
+    - mkdir -p output/go
+    - find proto -name *.proto -exec protoc -I proto -I /src/include/ -I include/googleapis --go_out=output/go {} \; 
+    - mkdir -p output/cpp
+    - protoc -I proto -I /src/include/ -I include/googleapis --cpp_out=output/cpp $(find proto -name '*.proto')
+    - mkdir -p output/python
+    - protoc -I proto -I /src/include/ -I include/googleapis --python_out=output/python $(find proto -name '*.proto')
+    - mkdir -p output/html
+    - protoc -I proto -I /src/include/ -I include/googleapis --doc_out=output/html --doc_opt=html,index.html $(find proto -name '*.proto')
+  except:
+    - schedule
+  artifacts:
+    paths:
+      - output/
+    expire_in: 4 weeks
+
+################################
+# Documentation 
+################################
+doc:
+  <<: *retry_on_system_failure
+  stage: build
+  variables:
+    DOC_REPO: apis-doc
+  before_script:
+    - 'which ssh-agent || ( apt-get update -y && apt-get install openssh-client -y )'
+    - mkdir -p ~/.ssh
+    - echo "$SSH_PRIVATE_KEY" | tr -d '\r' > ~/.ssh/id_rsa
+    - chmod 600 ~/.ssh/id_rsa
+    - eval $(ssh-agent -s)
+    - ssh-add ~/.ssh/id_rsa
+    - ssh-keyscan -H "${GITLAB_CI_ADDRESS}" >> ~/.ssh/known_hosts
+  script:
+    - echo "Protobuf documentation"
+    - git clone git@${GITLAB_CI_ADDRESS}:${CI_PROJECT_NAMESPACE}/${DOC_REPO}.git
+    - protoc -I proto -I /src/include/ -I include/googleapis --doc_out=${DOC_REPO} --doc_opt=html,index.html $(find proto -name '*.proto')
+    - protoc -I proto -I /src/include/ -I include/googleapis --doc_out=${DOC_REPO} --doc_opt=markdown,README.md $(find proto -name '*.proto')
+    - echo "Automatically commit the Protobuf documentation"
+    - cd ${DOC_REPO}
+    - git config user.email "$GITLAB_USER_EMAIL"
+    - git config user.name "Runner = $CI_RUNNER_DESCRIPTION"
+    - git update-index -q --refresh
+    - CHANGED=$(git diff-index --name-only HEAD --)
+    - if [ -n "$CHANGED" ]; then git commit -am "[skip ci] new documentation"; git push git@${GITLAB_CI_ADDRESS}:${CI_PROJECT_NAMESPACE}/${DOC_REPO}.git HEAD:${CI_COMMIT_REF_NAME}; fi
+    - cd ..
+  allow_failure: true
+  only:
+    - master
+  except:
+    - schedule
+
+dependencies-analysis:
+  <<: *retry_on_system_failure
+  image: ${ARTIFACTORY_RELEASE_ADDRESS}/onecloud-docker/proto-dependencies-analysis:770784
+  stage: build
+  script:
+    - python /dep-analysis.py proto/derence/internal/ derence/internal
+  except:
+    - schedule
+
+lint:
+  <<: *retry_on_system_failure
+  stage: test
+  script:
+    - buf check lint
+  except:
+    - schedule
+
+compatibility:
+  <<: *retry_on_system_failure
+  stage: test
+  only:
+    - merge_requests
+  script:
+    - echo "Checking merge request $CI_MERGE_REQUEST_TITLE of branch $CI_MERGE_REQUEST_SOURCE_BRANCH_NAME into $CI_MERGE_REQUEST_TARGET_BRANCH_NAME"
+    - echo "Lint check"
+    - buf check lint
+    - echo "Checkout out origin/$CI_MERGE_REQUEST_TARGET_BRANCH_NAME"
+    - git checkout origin/$CI_MERGE_REQUEST_TARGET_BRANCH_NAME
+    - git submodule update --init --recursive
+    - rm -f image.bin
+    - echo "Creating file descriptor from target branch $CI_MERGE_REQUEST_TARGET_BRANCH_NAME"
+    - buf image build -o image.bin --exclude-source-info
+    - echo "Checkout out $CI_COMMIT_SHA"
+    - git checkout $CI_COMMIT_SHA
+    - git submodule update --init --recursive
+    - buf check breaking --against-input image.bin
+    - rm -f image.bin
+
+# Automatically tag the repository
+tag:
+  <<: *retry_on_system_failure
+  image: ubuntu:20.04
+  stage: build
+  before_script:
+    - apt-get update --yes
+    - apt-get install --yes curl jq
+  script:
+    - LAST_TAG_COMMIT=$( curl --silent --show-error --fail "https://${CI_SERVER_HOST}/api/v4/projects/${CI_PROJECT_ID}/repository/tags?private_token=${GITLAB_TOKEN}" | jq -r ".[].commit.id" | head -n 1 )
+    - if [ $LAST_TAG_COMMIT = $CI_COMMIT_SHA ]; then echo "The project will not be tagged because there is no change since the previous tag."; exit 0; fi
+    - VERSION=$( curl --silent --show-error --fail "https://${CI_SERVER_HOST}/api/v4/projects/${CI_PROJECT_ID}/repository/tags?private_token=${GITLAB_TOKEN}" | jq -r ".[].name" | head -n 1 | cut -d '-' -f 2 )
+    - MAJOR=$( echo $VERSION | cut -d '.' -f 1 )
+    - MINOR=$( echo $VERSION | cut -d '.' -f 2 )
+    - FIX=$( echo $VERSION | cut -d '.' -f 3 )
+    - NEW_MINOR=$(( MINOR + 1 ))
+    - NEW_VERSION=release-$MAJOR.$NEW_MINOR.0
+    - curl -X POST --silent --show-error --fail "https://${CI_SERVER_HOST}/api/v4/projects/${CI_PROJECT_ID}/repository/tags?tag_name=${NEW_VERSION}&ref=${CI_COMMIT_SHA}&message=${NEW_VERSION}&release_description=${NEW_VERSION}&private_token=${GITLAB_TOKEN}"
+  only:
+    - schedule

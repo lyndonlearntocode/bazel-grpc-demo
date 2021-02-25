@@ -1,0 +1,8 @@
+image.*
+output/
+artifactory/target/
+.DS_Store
+# Intellij
+.idea/
+*.iml
+*.iws

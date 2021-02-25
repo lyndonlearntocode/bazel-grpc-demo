@@ -1,0 +1,9 @@
+proto_library(
+    name = "macs_cid_calc_grpc",
+    srcs = [
+        ":nlu_macs_cid_calc_service.proto",
+    ],
+    visibility = [
+        "//visibility:public",
+    ],
+)
