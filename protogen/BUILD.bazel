@@ -1,0 +1,25 @@
+load("@rules_proto_grpc//python:defs.bzl", "python_grpc_compile")
+load("@rules_proto_grpc//java:defs.bzl", "java_grpc_library")
+
+proto_library(
+    name = "macs_cid_calc_proto",
+    srcs = ["//protogen/apis/proto/derence/internal/nlu/v1alpha6:nlu_macs_cid_calc_service.proto"],
+)
+
+
+# python
+python_grpc_compile(
+    name = "macs_cid_calc_python_grpc",
+    deps = [
+      "@macs_cid_calc//protogen/apis/proto/derence/internal/nlu/v1alpha6:macs_cid_calc_grpc"
+    ],
+)
+
+
+# java
+java_grpc_library(
+    name = "macs_cid_calc_java_grpc",
+    deps = [
+      "@macs_cid_calc//protogen/apis/proto/derence/internal/nlu/v1alpha6:macs_cid_calc_grpc"
+    ],
+)

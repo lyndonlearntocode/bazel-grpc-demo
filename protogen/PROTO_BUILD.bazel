@@ -1,0 +1,10 @@
+# template to be copied to /protogen/apis/proto/derence/internal/nlu/v1alpha6
+proto_library(
+    name = "macs_cid_calc_grpc",
+    srcs = [
+        ":nlu_macs_cid_calc_service.proto",
+    ],
+    visibility = [
+        "//visibility:public",
+    ],
+)

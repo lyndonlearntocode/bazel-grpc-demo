@@ -1,6 +1,0 @@
-load("@rules_proto_grpc//java:defs.bzl", "java_grpc_library")
-
-java_grpc_library(
-    name = "greeter_java_library",
-    deps = ["@rules_proto_grpc//src/proto:greeter_grpc"],
-)
